@@ -1,0 +1,35 @@
+[Desktop Entry]
+Type=Application
+Name=rainshot
+Name[zh_CN]=rainshot
+Name[zh_TW]=rainshot
+GenericName=Screenshot and annotation
+Comment=Capture, annotate, pin and stitch screenshots locally
+Comment[zh_CN]=截图、标注、贴图、长图拼接和离线文字识别
+Exec=rainshot
+Icon=io.github.rainshot.rainshot
+Terminal=false
+Categories=Graphics;
+Keywords=screenshot;capture;annotation;截图;截圖;
+StartupWMClass=rainshot
+Actions=Capture;Fullscreen;Settings;History;
+
+[Desktop Action Capture]
+Name=Capture region
+Name[zh_CN]=区域截图
+Exec=rainshot --capture
+
+[Desktop Action Fullscreen]
+Name=Capture desktop
+Name[zh_CN]=全屏截图
+Exec=rainshot --fullscreen
+
+[Desktop Action Settings]
+Name=Settings
+Name[zh_TW]=設定
+Exec=rainshot --settings
+
+[Desktop Action History]
+Name=Screenshot history
+Name[zh_TW]=截圖記錄
+Exec=rainshot --history

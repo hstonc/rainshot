@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Rainshot large mixed element fixture</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; min-width: 980px; min-height: 640px; background: #e8edf5; }
+  section { position: absolute; border: 0; background: #dae4f0; }
+  button { position: absolute; border: 0; background: #536ba8; color: white; font: 15px sans-serif; }
+  #tall-group { left: 20px; top: 12px; width: 318px; height: 628px; }
+  #tall { left: 10px; top: 10px; width: 88px; height: 600px; }
+  #tall-small-a { left: 110px; top: 120px; width: 88px; height: 88px; }
+  #tall-small-b { left: 210px; top: 120px; width: 88px; height: 88px; }
+  #wide-group { left: 340px; top: 290px; width: 530px; height: 310px; }
+  #wide { left: 10px; top: 10px; width: 500px; height: 88px; }
+  #wide-small-a { left: 140px; top: 110px; width: 88px; height: 88px; }
+  #wide-small-b { left: 140px; top: 210px; width: 88px; height: 88px; }
+</style>
+<section id="tall-group" role="region" aria-label="Rainshot tall mixed group">
+  <button id="tall" aria-label="Rainshot 600 tall element">600 tall</button>
+  <button id="tall-small-a" aria-label="Rainshot tall small A">Tall A</button>
+  <button id="tall-small-b" aria-label="Rainshot tall small B">Tall B</button>
+</section>
+<section id="wide-group" role="region" aria-label="Rainshot wide mixed group">
+  <button id="wide" aria-label="Rainshot 500 wide element">500 wide</button>
+  <button id="wide-small-a" aria-label="Rainshot wide small A">Wide A</button>
+  <button id="wide-small-b" aria-label="Rainshot wide small B">Wide B</button>
+</section>
+</html>

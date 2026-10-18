@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+dist/
+*.deb
+*.rpm
+*.pkg.tar.*
+*.tar.gz
+build/
+*.egg-info/
+.venv/
+# Historical local QA output is kept privately; public illustrations use assets/.
+docs/*.json
+docs/*.png

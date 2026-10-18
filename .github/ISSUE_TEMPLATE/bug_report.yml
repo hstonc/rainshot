@@ -1,0 +1,31 @@
+name: Bug report / 問題回報
+description: Include desktop and session details / 請附桌面與工作階段資料
+body:
+  - type: input
+    id: version
+    attributes:
+      label: rainshot version / 版本
+      description: Run rainshot --version
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment / 環境
+      description: Distribution, desktop/compositor, X11 or Wayland, display scaling and package format.
+      placeholder: Linux Mint 21.3, Cinnamon, X11, 100%, .deb
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduce / 重現步驟
+      description: What you did, expected behavior, and actual behavior / 操作、預期與實際結果。
+    validations:
+      required: true
+  - type: textarea
+    id: diagnose
+    attributes:
+      label: Diagnostics / 診斷
+      description: Paste rainshot --diagnose output and relevant errors. Remove private paths or credentials first.
+      render: text

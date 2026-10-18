@@ -1,0 +1,26 @@
+rainshot
+Copyright (C) 2026 rainshot contributors
+SPDX-License-Identifier: GPL-3.0-or-later
+
+rainshot is distributed under the GNU General Public License, version 3 or
+(at your option) any later version. See LICENSE.
+
+The screenshot workflow was inspired by Snow Shot and Snow Apps:
+https://github.com/xiaofeiTM233/snow-shot
+https://github.com/mg-chao/snow-apps
+Flameshot was also consulted as a Linux screenshot reference:
+https://github.com/flameshot-org/flameshot
+
+This repository contains a separate Python/Qt application, not a GitHub fork
+or an official Linux edition of those projects. See docs/PROVENANCE.md for
+the checked source history, attribution scope and upstream license references.
+No affiliation or endorsement is implied.
+
+System libraries, Python dependencies and separately installed OCR models keep
+their own licenses. The distribution packages do not bundle those runtimes,
+models, upstream logos or upstream icon sets.
+
+rainshot 採 GPL-3.0-or-later 授權。操作流程受 Snow Shot / Snow Apps 啟發，
+亦參考 Flameshot 的 Linux 截圖行為；本倉庫為另一個 Python/Qt 應用，
+不是上述專案的 GitHub fork 或官方 Linux 版本。來源查核見
+docs/PROVENANCE.md。系統依賴與另行安裝的 OCR 模型維持各自授權。

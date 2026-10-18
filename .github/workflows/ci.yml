@@ -1,0 +1,336 @@
+name: Linux packages and release
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Pull requests and build jobs never receive release write permission.
+permissions:
+  contents: read
+
+concurrency:
+  group: rainshot-packages-${{ github.ref }}
+  # Do not interrupt a draft between uploading assets and publishing it.
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  source:
+    name: Release source and Arch recipe
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Read application version
+        id: version
+        run: |
+          /usr/bin/python3 - <<'PY'
+          import os, re, runpy
+          version = runpy.run_path('rainshot/__init__.py')['__version__']
+          if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version):
+              raise SystemExit('Expected a stable numeric release version')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as stream:
+              stream.write('version=' + version + '\n')
+          PY
+      - name: Build matching source and checksum-pinned Arch recipe
+        run: /usr/bin/python3 packaging/build_release.py dist --source-only
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-source
+          path: |
+            dist/rainshot-*-source.tar.gz
+            dist/rainshot-*-arch-build.tar.gz
+          if-no-files-found: error
+
+  ubuntu:
+    name: Ubuntu ${{ matrix.release }} full headless tests and Debian package
+    needs: source
+    runs-on: ubuntu-${{ matrix.release }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        release: ['22.04', '24.04']
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install distribution runtime and test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            python3-pyqt5 python3-pyqt5.qtsvg python3-numpy python3-opencv \
+            python3-pyatspi python3-qrcode python3-pil python3-pytest \
+            python3-dbus python3-gi dbus dbus-daemon libqt5svg5 qtwayland5 qt5-image-formats-plugins \
+            libx11-6 libxi6 libxtst6 libzbar0 ffmpeg fonts-noto-cjk
+      - name: Run complete headless suite with local IPC and private portal tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+          PYTHONPATH: .
+        run: dbus-run-session -- /usr/bin/python3 -m pytest -q --tb=short
+      - name: Build and install Debian package
+        run: |
+          /usr/bin/python3 packaging/build_deb.py dist
+          sudo apt-get install -y --no-install-recommends ./dist/rainshot_*_all.deb
+      - name: Check installed runtime outside the checkout
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          cd "$RUNNER_TEMP"
+          PYTHONPATH=/usr/lib/rainshot /usr/bin/python3 - <<'PY'
+          from PyQt5 import QtCore, QtDBus, QtGui, QtNetwork, QtSvg, QtWidgets
+          import numpy, cv2, pyatspi, rainshot.app, tempfile
+          from pathlib import Path
+          from rainshot.imaging import save_image, load_image
+          image = QtGui.QImage(16, 16, QtGui.QImage.Format_ARGB32)
+          image.fill(QtGui.QColor('white'))
+          with tempfile.TemporaryDirectory(prefix='rainshot-runtime-') as folder:
+              for suffix in ('png', 'jpg', 'webp'):
+                  path = Path(folder) / ('check.' + suffix)
+                  save_image(image, path)
+                  assert load_image(path).size() == image.size()
+          print('Installed runtime imports and PNG/JPEG/WebP round trips passed')
+          PY
+          rainshot --version
+          dbus-run-session -- rainshot --diagnose
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ubuntu-${{ matrix.release }}
+          path: dist/*.deb
+          if-no-files-found: error
+
+  arch:
+    name: Arch container package and installed runtime
+    needs: source
+    runs-on: ubuntu-24.04
+    container: archlinux:base-devel
+    timeout-minutes: 35
+    steps:
+      - name: Bootstrap official rolling Arch container
+        run: pacman -Syu --noconfirm --needed python git sudo ca-certificates tar
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-source
+          path: dist
+      - name: Build package as an unprivileged makepkg user
+        env:
+          RAINSHOT_VERSION: ${{ needs.source.outputs.version }}
+        run: |
+          arch_work="$RUNNER_TEMP/rainshot-arch"
+          mkdir -p "$arch_work"
+          tar -xzf "dist/rainshot-${RAINSHOT_VERSION}-arch-build.tar.gz" --strip-components=1 -C "$arch_work"
+          cp "dist/rainshot-${RAINSHOT_VERSION}-source.tar.gz" "$arch_work/"
+          useradd --create-home builder
+          printf 'builder ALL=(ALL) NOPASSWD: ALL\n' > /etc/sudoers.d/rainshot-builder
+          chmod 440 /etc/sudoers.d/rainshot-builder
+          chown -R builder:builder "$arch_work"
+          sudo -u builder bash -c 'cd "$1" && makepkg --syncdeps --noconfirm --cleanbuild --clean' bash "$arch_work"
+          mkdir -p dist-arch
+          cp "$arch_work/"*.pkg.tar.zst dist-arch/
+      - name: Install package and check actual runtime imports
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          pacman -U --noconfirm dist-arch/*.pkg.tar.zst
+          cd "$RUNNER_TEMP"
+          PYTHONPATH=/usr/lib/rainshot python - <<'PY'
+          from PyQt5 import QtCore, QtDBus, QtGui, QtNetwork, QtSvg, QtWidgets
+          import numpy, cv2, pyatspi, rainshot.app, tempfile
+          from pathlib import Path
+          from rainshot.imaging import save_image, load_image
+          image = QtGui.QImage(16, 16, QtGui.QImage.Format_ARGB32)
+          image.fill(QtGui.QColor('white'))
+          with tempfile.TemporaryDirectory(prefix='rainshot-runtime-') as folder:
+              for suffix in ('png', 'jpg', 'webp'):
+                  path = Path(folder) / ('check.' + suffix)
+                  save_image(image, path)
+                  assert load_image(path).size() == image.size()
+          print('Installed runtime imports and PNG/JPEG/WebP round trips passed')
+          PY
+          rainshot --version
+          dbus-run-session -- rainshot --diagnose
+      - uses: actions/upload-artifact@v7
+        with:
+          name: arch-package
+          path: dist-arch/*.pkg.tar.zst
+          if-no-files-found: error
+
+  fedora:
+    name: Fedora 44 container RPM and installed runtime
+    needs: source
+    runs-on: ubuntu-24.04
+    container: registry.fedoraproject.org/fedora:44
+    timeout-minutes: 35
+    steps:
+      - name: Install Fedora build and runtime dependencies
+        run: |
+          dnf install -y rpm-build python3 git tar gzip findutils desktop-file-utils \
+            python3-qt5 qt5-qtsvg qt5-qtwayland qt5-qtimageformats python3-numpy python3-opencv \
+            python3-pyatspi python3-dbus dbus-daemon libX11 libXi libXtst zbar ffmpeg-free
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-source
+          path: dist
+      - name: Build matching binary and source RPMs
+        env:
+          RAINSHOT_VERSION: ${{ needs.source.outputs.version }}
+        run: |
+          rpm_work="$RUNNER_TEMP/rainshot-rpm"
+          mkdir -p "$rpm_work"/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
+          cp "dist/rainshot-${RAINSHOT_VERSION}-source.tar.gz" "$rpm_work/SOURCES/"
+          rpmbuild -ba --define "_topdir $rpm_work" packaging/rpm/rainshot.spec
+          mkdir -p dist-fedora
+          cp "$rpm_work/RPMS/noarch/"*.rpm "$rpm_work/SRPMS/"*.src.rpm dist-fedora/
+      - name: Install RPM and check actual runtime imports
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          dnf install -y dist-fedora/*.noarch.rpm
+          cd "$RUNNER_TEMP"
+          PYTHONPATH=/usr/lib/rainshot python3 - <<'PY'
+          from PyQt5 import QtCore, QtDBus, QtGui, QtNetwork, QtSvg, QtWidgets
+          import numpy, cv2, pyatspi, rainshot.app, tempfile
+          from pathlib import Path
+          from rainshot.imaging import save_image, load_image
+          image = QtGui.QImage(16, 16, QtGui.QImage.Format_ARGB32)
+          image.fill(QtGui.QColor('white'))
+          with tempfile.TemporaryDirectory(prefix='rainshot-runtime-') as folder:
+              for suffix in ('png', 'jpg', 'webp'):
+                  path = Path(folder) / ('check.' + suffix)
+                  save_image(image, path)
+                  assert load_image(path).size() == image.size()
+          print('Installed runtime imports and PNG/JPEG/WebP round trips passed')
+          PY
+          rainshot --version
+          dbus-run-session -- rainshot --diagnose
+      - uses: actions/upload-artifact@v7
+        with:
+          name: fedora-44-package
+          path: dist-fedora/*.rpm
+          if-no-files-found: error
+
+  release:
+    name: Publish new version after all checks pass
+    needs: [source, ubuntu, arch, fedora]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && github.repository == 'hstonc/rainshot'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RAINSHOT_VERSION: ${{ needs.source.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Skip existing releases and superseded main commits
+        id: eligible
+        run: |
+          release_tag="v${RAINSHOT_VERSION}"
+          current_main=$(gh api "repos/$GH_REPO/git/ref/heads/main" --jq .object.sha)
+          if [[ "$current_main" != "$GITHUB_SHA" ]]; then
+            echo 'Main has moved; the newer workflow run will publish.'
+            exit 0
+          fi
+          gh api --paginate "repos/$GH_REPO/releases?per_page=100" --jq '.[].tag_name' > "$RUNNER_TEMP/rainshot-release-tags"
+          if /usr/bin/python3 -c 'from pathlib import Path; import sys; sys.exit(0 if sys.argv[1] in Path(sys.argv[2]).read_text().splitlines() else 1)' "$release_tag" "$RUNNER_TEMP/rainshot-release-tags"; then
+            echo "Release $release_tag already exists; leaving it unchanged."
+            exit 0
+          fi
+          if git show-ref --verify --quiet "refs/tags/$release_tag"; then
+            test "$(git rev-parse "$release_tag^{commit}")" = "$GITHUB_SHA"
+          fi
+          echo 'publish=true' >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v8
+        if: steps.eligible.outputs.publish == 'true'
+        with:
+          name: release-source
+          path: release-assets
+      - uses: actions/download-artifact@v8
+        if: steps.eligible.outputs.publish == 'true'
+        with:
+          name: ubuntu-22.04
+          path: release-assets
+      - uses: actions/download-artifact@v8
+        if: steps.eligible.outputs.publish == 'true'
+        with:
+          name: arch-package
+          path: release-assets
+      - uses: actions/download-artifact@v8
+        if: steps.eligible.outputs.publish == 'true'
+        with:
+          name: fedora-44-package
+          path: release-assets
+      - name: Verify required artifacts and write SHA256SUMS
+        if: steps.eligible.outputs.publish == 'true'
+        run: |
+          /usr/bin/python3 - <<'PY'
+          import hashlib, os
+          from pathlib import Path
+          version = os.environ['RAINSHOT_VERSION']
+          root = Path('release-assets')
+          required = [f'rainshot-{version}-source.tar.gz', f'rainshot-{version}-arch-build.tar.gz', f'rainshot_{version}_all.deb']
+          for name in required:
+              if not (root / name).is_file():
+                  raise SystemExit('Missing required release asset: ' + name)
+          for pattern in ('*.pkg.tar.zst', '*.noarch.rpm', '*.src.rpm'):
+              if not list(root.glob(pattern)):
+                  raise SystemExit('Missing required release artifact type: ' + pattern)
+          files = sorted(path for path in root.iterdir() if path.is_file())
+          if any(path.stat().st_size == 0 for path in files):
+              raise SystemExit('An artifact is empty')
+          lines = [hashlib.sha256(path.read_bytes()).hexdigest() + '  ' + path.name + '\n' for path in files]
+          (root / 'SHA256SUMS').write_text(''.join(lines))
+          PY
+          cd release-assets
+          sha256sum --check SHA256SUMS
+      - name: Create draft, upload complete assets, then publish
+        if: steps.eligible.outputs.publish == 'true'
+        run: |
+          cat > "$RUNNER_TEMP/rainshot-release-notes.md" <<EOF
+          ## 中文
+
+          rainshot ${RAINSHOT_VERSION}：Linux 截圖、貼圖標註、本機 OCR、翻譯、QR、取色，以及 X11 捲動長截和 GIF / 動態 WebP 錄製。支援游標位於相鄰元素間隙時選取多元素共同外框。
+
+          安裝包：Ubuntu / Mint / Debian 使用 .deb；Arch 使用 .pkg.tar.zst；Fedora 44 使用 .noarch.rpm。同頁提供完整來源、Arch 建置配方、來源 RPM 與 SHA256SUMS。
+
+          此 commit 已通過 Ubuntu 22.04 / 24.04 完整 headless 測試，以及 Arch / Fedora 容器建置、套件安裝、執行依賴匯入與 --diagnose 檢查。容器檢查不代表這些發行版的桌面實機驗證；原生桌面基線為 Mint 21.3 / Cinnamon / X11。
+
+          Wayland 使用系統 Screenshot Portal；此版沒有元素吸附、連續長截、GIF / WebP 錄製或程式內全域快捷鍵。詳見倉庫 README、docs/COMPATIBILITY.md 與 docs/PROVENANCE.md。安裝前請退出舊版，安裝後重新啟動。
+
+          ## English
+
+          rainshot ${RAINSHOT_VERSION} provides Linux screenshots, floating annotation, local OCR, translation, QR decoding, color sampling, and X11 scrolling capture / GIF or animated WebP recording. Adjacent-element gaps can select the bounding rectangle of multiple elements.
+
+          Assets include a Debian package, an Arch package, a Fedora 44 RPM, matching source, an Arch build recipe, a source RPM, and SHA256SUMS. Packages use distribution-provided runtimes.
+
+          This commit passed full headless tests on Ubuntu 22.04 / 24.04 plus package builds, installation, runtime imports and diagnostics in Arch / Fedora containers. Container checks do not establish native desktop support. The native desktop baseline remains Mint 21.3 / Cinnamon / X11.
+
+          Wayland uses the system Screenshot Portal. Element snapping, continuous scrolling capture, animation recording and in-app global shortcut registration are not implemented on Wayland. Read README and docs/COMPATIBILITY.md before installing; quit the old process and restart after upgrading.
+
+          Commit: $GITHUB_SHA
+          Build: https://github.com/$GH_REPO/actions/runs/$GITHUB_RUN_ID
+          License: GPL-3.0-or-later; upstream credits and dependency scope are in docs/PROVENANCE.md.
+          EOF
+          gh release create "v${RAINSHOT_VERSION}" --target "$GITHUB_SHA" --draft \
+            --title "rainshot ${RAINSHOT_VERSION}" --notes-file "$RUNNER_TEMP/rainshot-release-notes.md"
+          gh release upload "v${RAINSHOT_VERSION}" release-assets/*
+          gh release edit "v${RAINSHOT_VERSION}" --draft=false --latest

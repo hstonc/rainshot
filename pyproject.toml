@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rainshot"
+version = "0.4.7"
+description = "Linux-native screenshot, floating annotation, OCR and multi-provider translation"
+readme = "README.md"
+authors = [{name = "rainshot contributors"}]
+requires-python = ">=3.10"
+license = {text = "GPL-3.0-or-later"}
+dependencies = ["PyQt5>=5.15", "numpy>=1.21", "opencv-python-headless>=4.5"]
+
+[project.urls]
+Homepage = "https://github.com/hstonc/rainshot"
+Repository = "https://github.com/hstonc/rainshot"
+Issues = "https://github.com/hstonc/rainshot/issues"
+Documentation = "https://github.com/hstonc/rainshot#readme"
+
+[project.scripts]
+rainshot = "rainshot.app:main"
+
+[tool.setuptools.package-data]
+rainshot = ["icon.svg"]
+
+[tool.setuptools.packages.find]
+include = ["rainshot*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
